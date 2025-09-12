@@ -1,0 +1,41 @@
+# Build results
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+artifacts/
+
+# Visual Studio files
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+Generated_Code/
+*.log
+*.vspscc
+*.vssscc
+
+# Package files
+packages/
+*.nupkg
+*.snupkg
+*.dll
+*.exe
+
+# ReSharper and other add-ins
+_ReSharper*/
+*.DotSettings.user
+
+# Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+nunit-*.xml
+
+# Other common files
+*.bak
+*.tmp
+*.pdb
+*.pidb
+*.vsp
+*.psess
