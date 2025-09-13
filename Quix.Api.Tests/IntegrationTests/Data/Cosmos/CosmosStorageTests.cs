@@ -63,7 +63,7 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
         {
             // Arrange & Act & Assert
             await Assert.ThrowsAsync<ArgumentNullException>(() =>
-                _storage.Create(TestEntityName, "test-id",  null!));
+                _storage.Create(TestEntityName, "test-id", null!));
         }
 
         [Fact]
@@ -74,7 +74,7 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
 
             // Act & Assert
             await Assert.ThrowsAsync<ArgumentNullException>(() =>
-                _storage.Create("", "test-id",  entity));
+                _storage.Create("", "test-id", entity));
         }
 
         #endregion
@@ -87,7 +87,7 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
             // Arrange
             var entityId = Guid.NewGuid().ToString();
             var entity = CreateTestEntity("Test User", 25, "active");
-            await _storage.Create(TestEntityName, entityId,  entity);
+            await _storage.Create(TestEntityName, entityId, entity);
 
             // Act
             var result = await _storage.Read(TestEntityName, entityId, entityId);
@@ -114,9 +114,6 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
 
             // Assert
             Assert.Null(result);
-
-            // Cleanup
-            await _storage.Delete(TestEntityName, entityId, entityId);
         }
 
         [Fact]
@@ -145,7 +142,7 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
             // Arrange
             var entityId = Guid.NewGuid().ToString();
             var originalEntity = CreateTestEntity("Original User", 25, "active");
-            await _storage.Create(TestEntityName, entityId,   originalEntity);
+            await _storage.Create(TestEntityName, entityId, originalEntity);
 
             var updatedEntity = CreateTestEntity("Updated User", 30, "inactive");
             updatedEntity.ToDictionary()["email"] = "updated@test.com";
@@ -172,13 +169,11 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
             // Arrange
             var entityId = Guid.NewGuid().ToString();
             var entity = CreateTestEntity("Test User", 25, "active");
+            
 
             // Act & Assert
             await Assert.ThrowsAsync<CosmosException>(() =>
                 _storage.Replace(TestEntityName, entityId, entity));
-
-            // Cleanup
-            await _storage.Delete(TestEntityName, entityId, entityId);
         }
 
         [Fact]
@@ -207,9 +202,6 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
             // Assert
             var result = await _storage.Read(TestEntityName, entityId, entityId);
             Assert.Null(result);
-
-            // Cleanup
-            await _storage.Delete(TestEntityName, entityId, entityId);
         }
 
         [Fact]
@@ -255,7 +247,7 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
                 var entityId = Guid.NewGuid().ToString();
                 var entity = CreateTestEntity($"User {i}", 20 + i, "active");
                 entity.ToDictionary()["index"] = i;
-                
+
                 await _storage.Create(TestEntityName, entityId, entity);
                 entityIds.Add(entityId);
                 entities.Add(entity);
@@ -267,7 +259,7 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
             // Assert
             Assert.NotNull(result);
             Assert.Single(result);
-            
+
             foreach (var entityId in entityIds)
             {
                 Assert.True(result.ContainsKey(entityId));
@@ -323,10 +315,10 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
             var result = await _storage.Query(TestEntityName, query);
 
             // Assert
-            Assert.NotNull(result);
-            var resultList = result.ToList();
+            Assert.NotNull(result.Items);
+            var resultList = result.Items.ToList();
             Assert.Equal(2, resultList.Count);
-            Assert.All(resultList, entity => 
+            Assert.All(resultList, entity =>
                 Assert.Equal("active", entity.ToDictionary()["status"]));
 
             // Cleanup
@@ -339,7 +331,7 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
         public async Task Query_WithRangeFilter_ShouldReturnMatchingEntities()
         {
             // Arrange
-           dynamic entity1 = await _storage.Create(TestEntityName, Guid.NewGuid().ToString(), CreateTestEntity("John Doe", 25, "active"));
+            dynamic entity1 = await _storage.Create(TestEntityName, Guid.NewGuid().ToString(), CreateTestEntity("John Doe", 25, "active"));
             dynamic entity2 = await _storage.Create(TestEntityName, Guid.NewGuid().ToString(), CreateTestEntity("Jane Smith", 30, "active"));
             dynamic entity3 = await _storage.Create(TestEntityName, Guid.NewGuid().ToString(), CreateTestEntity("Bob Johnson", 35, "inactive"));
 
@@ -365,7 +357,7 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
 
             // Assert
             Assert.NotNull(result);
-            var resultList = result.ToList();
+            var resultList = result.Items.ToList();
             Assert.Single(resultList);
             Assert.Equal(25L, resultList.First().ToDictionary()["age"]);
 
@@ -394,7 +386,7 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
 
             // Assert
             Assert.NotNull(result);
-            var resultList = result.ToList();
+            var resultList = result.Items.ToList();
             Assert.Equal(3, resultList.Count);
             Assert.Equal("Alice", resultList[0].ToDictionary()["name"]);
             Assert.Equal("Bob", resultList[1].ToDictionary()["name"]);
@@ -409,10 +401,12 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
         [Fact]
         public async Task Query_WithLimit_ShouldReturnLimitedResults()
         {
+            List<ExpandoObject> createdEntities = new List<ExpandoObject>();
             // Arrange
             for (int i = 0; i < 5; i++)
             {
                 dynamic entity = await _storage.Create(TestEntityName, Guid.NewGuid().ToString(), CreateTestEntity($"User {i}", 20 + i, "active"));
+                createdEntities.Add(entity);
             }
 
             var query = new Query
@@ -425,11 +419,11 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
 
             // Assert
             Assert.NotNull(result);
-            var resultList = result.ToList();
+            var resultList = result.Items.ToList();
             Assert.Equal(3, resultList.Count);
 
             // Cleanup
-            foreach (var entity in resultList)
+            foreach (var entity in createdEntities)
             {
                 await _storage.Delete(TestEntityName, entity.ToDictionary()[EntityFieldTokens.Id]!.ToString()!, entity.ToDictionary()[EntityFieldTokens.Id]!.ToString()!);
             }
@@ -482,7 +476,7 @@ namespace Quix.Api.Tests.IntegrationTests.Data.Cosmos
 
             // Assert
             Assert.NotNull(result);
-            var resultList = result.ToList();
+            var resultList = result.Items.ToList();
             Assert.Single(resultList);
             Assert.Equal("John Doe", resultList.First().ToDictionary()["name"]);
 

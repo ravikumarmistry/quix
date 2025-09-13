@@ -12,33 +12,12 @@ namespace Quix.Api.Core
         public List<string>? Fields { get; set; }
     }
 
-    public class CreateRequest
+    public class QueryResult
     {
-        public ExpandoObject Entity { get; set; } = null!;
+        public IEnumerable<ExpandoObject> Items { get; set; } = null!;
+        public string? ContinuationToken { get; set; }
     }
 
-    public class UpdateRequest
-    {
-        public ExpandoObject Entity { get; set; } = null!;
-        public string Id { get; set; } = null!;
-    }
-
-    public class PatchRequest
-    {
-        public ExpandoObject Entity { get; set; } = null!;
-        public string Id { get; set; } = null!;
-    }
-
-    public class DeleteRequest {
-        public string Id { get; set; } = null!;
-        public string? PKey { get; set; }
-    }
-
-    public class ReadRequest
-    {
-        public string Id { get; set; } = null!;
-        public string? PKey { get; set; }
-    }
 
     public class ReadMapRequest
     {
@@ -52,7 +31,7 @@ namespace Quix.Api.Core
         Task Delete(string entityName, string? pKey, string entityId);
         Task<ExpandoObject?> Read(string entityName, string entityId, string? pKey);
         Task<Dictionary<string, ExpandoObject>> ReadMap(string entityName, string? pKey, IEnumerable<string> entityIds);
-        Task<IEnumerable<ExpandoObject>> Query(string entityName, Query query);
+        Task<QueryResult> Query(string entityName, Query query);
         Task<long> Count(string entityName, Query query);
     }
 

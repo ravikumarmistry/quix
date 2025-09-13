@@ -148,7 +148,7 @@ namespace Quix.Api.Data.Cosmos
 
         }
 
-        public async Task<IEnumerable<ExpandoObject>> Query(string entityName, Query query)
+        public async Task<QueryResult> Query(string entityName, Query query)
         {
             var queryDefinition = CosmosQueryBuilder.GetQueryDefinition(query);
             var container = cosmosContainerProvider.GetOrAddEntityContainer(entityName);
@@ -157,12 +157,13 @@ namespace Quix.Api.Data.Cosmos
                 MaxItemCount = query.Limit ?? 1000
             });
             var results = new List<ExpandoObject>();
-            while (queryResultSetIterator.HasMoreResults)
+            var currentResultSet = await queryResultSetIterator.ReadNextAsync();
+            results.AddRange(currentResultSet);
+            return new QueryResult()
             {
-                var currentResultSet = await queryResultSetIterator.ReadNextAsync();
-                results.AddRange(currentResultSet);
-            }
-            return results;
+                Items = results,
+                ContinuationToken = currentResultSet.ContinuationToken
+            };
         }
 
         public async Task<ExpandoObject> Replace(string entityName, string entityId, ExpandoObject entity)
