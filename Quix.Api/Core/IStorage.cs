@@ -1,10 +1,10 @@
-﻿using System.Text.Json.Nodes;
+﻿using System.Dynamic;
 
 namespace Quix.Api.Core
 {
     public class Query
     {
-        public JsonNode? Filter { get; set; }
+        public ExpandoObject? Filter { get; set; }
         public int? Limit { get; set; }
         public string? ContinuationToken { get; set; }
         public List<string>? Sort { get; set; }
@@ -14,18 +14,18 @@ namespace Quix.Api.Core
 
     public class CreateRequest
     {
-        public JsonObject Entity { get; set; } = null!;
+        public ExpandoObject Entity { get; set; } = null!;
     }
 
     public class UpdateRequest
     {
-        public JsonObject Entity { get; set; } = null!;
+        public ExpandoObject Entity { get; set; } = null!;
         public string Id { get; set; } = null!;
     }
 
     public class PatchRequest
     {
-        public JsonObject Entity { get; set; } = null!;
+        public ExpandoObject Entity { get; set; } = null!;
         public string Id { get; set; } = null!;
     }
 
@@ -47,12 +47,12 @@ namespace Quix.Api.Core
 
     public interface IStorage
     {
-        Task<JsonObject> Create(string entityName, string? entityId, string? pKey, JsonObject entity);
-        Task<JsonObject> Replace(string entityName, string entityId, string? pKey, JsonObject entity);
+        Task<ExpandoObject> Create(string entityName, string? entityId, ExpandoObject entity);
+        Task<ExpandoObject> Replace(string entityName, string entityId, ExpandoObject entity);
         Task Delete(string entityName, string? pKey, string entityId);
-        Task<JsonObject?> Read(string entityName, string entityId, string? pKey);
-        Task<Dictionary<string, JsonObject>> ReadMap(string entityName, string? pKey, IEnumerable<string> entityIds);
-        Task<IEnumerable<JsonObject>> Query(string entityName, Query query);
+        Task<ExpandoObject?> Read(string entityName, string entityId, string? pKey);
+        Task<Dictionary<string, ExpandoObject>> ReadMap(string entityName, string? pKey, IEnumerable<string> entityIds);
+        Task<IEnumerable<ExpandoObject>> Query(string entityName, Query query);
         Task<long> Count(string entityName, Query query);
     }
 

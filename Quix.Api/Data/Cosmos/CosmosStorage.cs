@@ -1,19 +1,18 @@
-﻿using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.Azure.Cosmos;
+﻿using Microsoft.Azure.Cosmos;
 using Quix.Api.Core;
 using System.Collections.Concurrent;
-using System.Text.Json.Nodes;
+using System.Dynamic;
 
 namespace Quix.Api.Data.Cosmos
 {
-    public class CosmosOptions
+    public record QuixCosmosStorageOptions
     {
-        public string DatabaseId { get; init; } = "Quix";
+        public required string DatabaseId { get; init; }
     }
     public static class CosmosStorageServiceExtensions
     {
         // This method would typically be used to register the CosmosStorage service with a dependency injection container.
-        public static IServiceCollection AddCosmosStorage(this IServiceCollection services, CosmosOptions cosmosOptions)
+        public static IServiceCollection AddQuixCosmosStorage(this IServiceCollection services, QuixCosmosStorageOptions cosmosOptions)
         {
             services.AddSingleton((sp) =>
             {
@@ -24,15 +23,29 @@ namespace Quix.Api.Data.Cosmos
                 return database.Database;
             });
             services.AddSingleton<IStorage, CosmosStorage>();
-
+            services.AddSingleton<ICosmosContainerProvider, CosmosContainerProvider>();
+            services.AddSingleton<ICosmosContainerConfigurationProvider>(sp =>
+            {
+                CosmosContainerConfigrations schemaConfig = new CosmosContainerConfigrations()
+                {
+                    ContainerId = StorageEntityTokens.SchemaEntityName,
+                    EntityName = StorageEntityTokens.SchemaEntityName,
+                    PKeyValueField = EntityFieldTokens.Id
+                };
+                var configs = new List<CosmosContainerConfigrations>() { schemaConfig };
+                var configProvider = new CosmosContainerConfigurationProvider(configs);
+                return configProvider;
+            });
             return services;
         }
     }
-    public record CosmosContainerConfigrations(
-        string EntityName,
-        string ContainerId,
-        string PKeyValueField
-        );
+
+    public record CosmosContainerConfigrations()
+    {
+        public required string EntityName { get; init; }
+        public required string ContainerId { get; init; }
+        public required string PKeyValueField { get; init; }
+    }
 
     public interface ICosmosContainerConfigurationProvider
     {
@@ -87,10 +100,10 @@ namespace Quix.Api.Data.Cosmos
 
     public class CosmosStorage : IStorage
     {
-        private readonly CosmosContainerProvider cosmosContainerProvider;
-        private readonly CosmosContainerConfigurationProvider cosmosContainerConfigurationProvider;
+        private readonly ICosmosContainerProvider cosmosContainerProvider;
+        private readonly ICosmosContainerConfigurationProvider cosmosContainerConfigurationProvider;
 
-        public CosmosStorage(CosmosContainerProvider cosmosContainerProvider, CosmosContainerConfigurationProvider cosmosContainerConfigurationProvider)
+        public CosmosStorage(ICosmosContainerProvider cosmosContainerProvider, ICosmosContainerConfigurationProvider cosmosContainerConfigurationProvider)
         {
             this.cosmosContainerProvider = cosmosContainerProvider;
             this.cosmosContainerConfigurationProvider = cosmosContainerConfigurationProvider;
@@ -101,23 +114,27 @@ namespace Quix.Api.Data.Cosmos
             throw new NotImplementedException();
         }
 
-        public async Task<JsonObject> Create(string entityName, string? entityId, string? pKey, JsonObject entity)
+        public async Task<ExpandoObject> Create(string entityName, string? entityId, ExpandoObject entity)
         {
             // create the new entity
             if (string.IsNullOrWhiteSpace(entityName)) throw new ArgumentNullException(nameof(entityName));
             if (entity == null) throw new ArgumentNullException(nameof(entity));
+
             var id = entityId ?? Guid.CreateVersion7(DateTimeOffset.UtcNow).ToString();
-            entity
-                .SetPath(EntityFieldTokens.Id, id)
-                .SetPath(EntityFieldTokens.CreatedAt, DateTimeOffset.UtcNow)
-                .SetPath(EntityFieldTokens.UpdatedAt, DateTimeOffset.UtcNow)
-                .SetPath(EntityFieldTokens.EntityName, entityName);
+            var dict = entity.ToDictionary();
+            var date = DateTimeOffset.UtcNow;
+            dict[EntityFieldTokens.Id] = id;
+            dict[EntityFieldTokens.CreatedAt] = date;
+            dict[EntityFieldTokens.UpdatedAt] = date;
+            dict[EntityFieldTokens.EntityName] = entityName;
+
 
             var container = cosmosContainerProvider.GetOrAddEntityContainer(entityName);
-            var res = await container.CreateItemAsync(entity, new PartitionKey(pKey));
+            var res = await container.CreateItemAsync(entity);
             // TODO: Log the RUs consumed
             // TODO: Emit create event
-            return res.Resource;
+            var item = res.Resource;
+            return item;
         }
 
         public async Task Delete(string entityName, string? pKey, string entityId)
@@ -125,20 +142,21 @@ namespace Quix.Api.Data.Cosmos
             if (entityName == null) throw new ArgumentNullException(nameof(entityName));
             if (entityId == null) throw new ArgumentNullException(nameof(entityId));
             var container = cosmosContainerProvider.GetOrAddEntityContainer(entityName);
-            var res = await container.DeleteItemAsync<JsonObject>(entityId, new PartitionKey(pKey));
+            var res = await container.DeleteItemAsync<ExpandoObject>(entityId, new PartitionKey(pKey));
             // TODO: Log the RUs consumed
             // TODO: Emit delete event
+
         }
 
-        public async Task<IEnumerable<JsonObject>> Query(string entityName, Query query)
+        public async Task<IEnumerable<ExpandoObject>> Query(string entityName, Query query)
         {
-            var queryDefinition = GetCosmosQuery(query);
+            var queryDefinition = CosmosQueryBuilder.GetQueryDefinition(query);
             var container = cosmosContainerProvider.GetOrAddEntityContainer(entityName);
-            var queryResultSetIterator = container.GetItemQueryIterator<JsonObject>(queryDefinition, query.ContinuationToken, new QueryRequestOptions()
+            var queryResultSetIterator = container.GetItemQueryIterator<ExpandoObject>(queryDefinition, query.ContinuationToken, new QueryRequestOptions()
             {
                 MaxItemCount = query.Limit ?? 1000
             });
-            var results = new List<JsonObject>();
+            var results = new List<ExpandoObject>();
             while (queryResultSetIterator.HasMoreResults)
             {
                 var currentResultSet = await queryResultSetIterator.ReadNextAsync();
@@ -147,44 +165,57 @@ namespace Quix.Api.Data.Cosmos
             return results;
         }
 
-        public async Task<JsonObject> Replace(string entityName, string entityId, string? pKey, JsonObject entity)
+        public async Task<ExpandoObject> Replace(string entityName, string entityId, ExpandoObject entity)
         {
             if (entityName == null) throw new ArgumentNullException(nameof(entityName));
             if (entityId == null) throw new ArgumentNullException(nameof(entityId));
+            if (entity == null) throw new ArgumentNullException(nameof(entity));
+            var dict = entity.ToDictionary();
+            var config = cosmosContainerConfigurationProvider.GetEntityConfigrations(entityName);
+            var date = DateTimeOffset.UtcNow;
+            dict[EntityFieldTokens.Id] = entityId;
+            dict[EntityFieldTokens.UpdatedAt] = date;
+            dict[EntityFieldTokens.EntityName] = entityName;
 
-            entity
-                .SetPath(EntityFieldTokens.Id, entityId)
-                .SetPath(EntityFieldTokens.UpdatedAt, DateTimeOffset.UtcNow)
-                .SetPath(EntityFieldTokens.EntityName, entityName);
             var container = cosmosContainerProvider.GetOrAddEntityContainer(entityName);
 
             // replace the entity
-            var res = await container.ReplaceItemAsync(entity, entityId, new PartitionKey(pKey));
+            var res = await container.ReplaceItemAsync(entity, entityId);
             return res.Resource;
         }
 
-        public async Task<JsonObject?> Read(string entityName, string entityId, string? pKey)
+        public async Task<ExpandoObject?> Read(string entityName, string entityId, string? pKey)
         {
             if (entityId == null) throw new ArgumentNullException(nameof(entityId));
             if (entityName == null) throw new ArgumentNullException(nameof(entityName));
             var container = cosmosContainerProvider.GetOrAddEntityContainer(entityName);
-            var response = await container.ReadItemAsync<JsonObject>(entityId, new PartitionKey(pKey));
-            // TODO: Log the RUs consumed
-            var item = response.Resource;
-
-            return item;
+            try
+            {
+                var response = await container.ReadItemAsync<ExpandoObject>(entityId, new PartitionKey(pKey));
+                // TODO: Log the RUs consumed
+                var item = response.Resource;
+                return item;
+            }
+            catch (CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+            catch (Exception ex)
+            {
+                throw;
+            }
         }
 
-        public async Task<Dictionary<string, JsonObject>> ReadMap(string entityName, string? pKey, IEnumerable<string> entityIds)
+        public async Task<Dictionary<string, ExpandoObject>> ReadMap(string entityName, string? pKey, IEnumerable<string> entityIds)
         {
             if (entityName == null) throw new ArgumentNullException(nameof(entityName));
             if (entityIds == null) throw new ArgumentNullException(nameof(entityIds));
 
             var config = cosmosContainerConfigurationProvider.GetEntityConfigrations(entityName);
             var container = cosmosContainerProvider.GetOrAddEntityContainer(entityName);
-            var result = new Dictionary<string, JsonObject>();
+            var result = new Dictionary<string, ExpandoObject>();
             // make a single query to get all the items for one partition key, ids is already partitioned by PKey
-            var sqlQueryText = $"SELECT * FROM c WHERE {config!.PKeyValueField} = @pKey AND c.id IN ({string.Join(",", entityIds.Select((id, index) => $"@id{index}"))}) ";
+            var sqlQueryText = $"SELECT * FROM c WHERE c.{config!.PKeyValueField} = @pKey AND c.id IN ({string.Join(",", entityIds.Select((id, index) => $"@id{index}"))}) ";
             var queryDefinition = new QueryDefinition(sqlQueryText);
 
             queryDefinition.WithParameter("@pKey", pKey);
@@ -192,33 +223,19 @@ namespace Quix.Api.Data.Cosmos
             {
                 queryDefinition.WithParameter($"@id{i}", entityIds.ElementAt(i));
             }
-            var queryResultSetIterator = container.GetItemQueryIterator<JsonObject>(queryDefinition, requestOptions: new QueryRequestOptions { PartitionKey = new PartitionKey(pKey) });
+            var queryResultSetIterator = container.GetItemQueryIterator<ExpandoObject>(queryDefinition, requestOptions: new QueryRequestOptions { PartitionKey = new PartitionKey(pKey) });
             while (queryResultSetIterator.HasMoreResults)
             {
                 var currentResultSet = await queryResultSetIterator.ReadNextAsync();
                 // add result by ids to the dictionary
                 foreach (var entity in currentResultSet)
                 {
-                    var id = entity[EntityFieldTokens.Id]!.ToString()!;
+                    var dict = entity.ToDictionary();
+                    var id = dict[EntityFieldTokens.Id]!.ToString()!;
                     result[id] = entity;
                 }
             }
             return result;
-        }
-
-        private QueryDefinition GetCosmosQuery(Query query)
-        {
-            if(query == null) throw new ArgumentNullException("query");
-
-            var q = "SELECT * FROM c";
-            if (query.Filter != null)
-            {
-
-            }
-            if (query.Sort != null && query.Sort.Count != 0)
-            {
-
-            }
         }
     }
 }

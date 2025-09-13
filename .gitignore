@@ -39,3 +39,4 @@ nunit-*.xml
 *.pidb
 *.vsp
 *.psess
+/Quix.Api.Tests/testsettings.json
